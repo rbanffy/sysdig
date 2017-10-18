@@ -256,6 +256,15 @@ static int register_sched_switch(void)
 #endif
 }
 
+static int register_signal_deliver(void)
+{
+#ifdef CAPTURE_SIGNAL_DELIVERIES
+	return compat_register_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
+#else
+	return 0;
+#endif
+}
+
 static void compat_unregister_trace(void *func, const char *probename, struct tracepoint *tp)
 {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0))
@@ -287,6 +296,13 @@ static void unregister_sched_switch(void)
 {
 #ifdef CAPTURE_CONTEXT_SWITCHES
 	compat_unregister_trace(sched_switch_probe, "sched_switch", tp_sched_switch);
+#endif
+}
+
+static void unregister_signal_deliver(void)
+{
+#ifdef CAPTURE_SIGNAL_DELIVERIES
+	compat_unregister_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
 #endif
 }
 
@@ -522,13 +538,11 @@ static int ppm_open(struct inode *inode, struct file *filp)
 			goto err_sched_switch;
 		}
 
-#ifdef CAPTURE_SIGNAL_DELIVERIES
-		ret = compat_register_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
+		ret = register_signal_deliver();
 		if (ret) {
 			pr_err("can't create the signal_deliver tracepoint\n");
 			goto err_signal_deliver;
 		}
-#endif
 		g_tracepoint_registered = true;
 	}
 
@@ -611,9 +625,7 @@ static int ppm_release(struct inode *inode, struct file *filp)
 			unregister_sysenter();
 			compat_unregister_trace(syscall_procexit_probe, "sched_process_exit", tp_sched_process_exit);
 			unregister_sched_switch();
-#ifdef CAPTURE_SIGNAL_DELIVERIES
-			compat_unregister_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
-#endif
+			unregister_signal_deliver();
 #ifdef CAPTURE_PAGE_FAULTS
 			if (g_fault_tracepoint_registered) {
 				compat_unregister_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
@@ -1011,7 +1023,7 @@ cleanup_ioctl_procinfo:
 	{
 		vpr_info("PPM_IOCTL_DISABLE_SIGNAL_DELIVER\n");
 		if (g_tracepoint_registered)
-			compat_unregister_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
+			unregister_signal_deliver();
 		ret = 0;
 		goto cleanup_ioctl;
 	}
@@ -1019,7 +1031,7 @@ cleanup_ioctl_procinfo:
 	{
 		vpr_info("PPM_IOCTL_ENABLE_SIGNAL_DELIVER\n");
 		if (g_tracepoint_registered)
-			compat_register_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
+			register_signal_deliver();
 		ret = 0;
 		goto cleanup_ioctl;
 	}
