@@ -238,6 +238,15 @@ static int register_sysexit(void)
 #endif
 }
 
+static int register_sysenter(void)
+{
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
+	return compat_register_trace(syscall_enter_probe, "sys_enter", tp_sys_enter);
+#else
+	return register_trace_syscall_enter(syscall_enter_probe);
+#endif
+}
+
 static void compat_unregister_trace(void *func, const char *probename, struct tracepoint *tp)
 {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0))
@@ -253,6 +262,15 @@ static void unregister_sysexit(void)
 	compat_unregister_trace(syscall_exit_probe, "sys_exit", tp_sys_exit);
 #else
 	unregister_trace_syscall_exit(syscall_exit_probe);
+#endif
+}
+
+static void unregister_sysenter(void)
+{
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
+	compat_unregister_trace(syscall_enter_probe, "sys_enter", tp_sys_enter);
+#else
+	unregister_trace_syscall_enter(syscall_enter_probe);
 #endif
 }
 
@@ -470,11 +488,7 @@ static int ppm_open(struct inode *inode, struct file *filp)
 			goto err_sys_exit;
 		}
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
-		ret = compat_register_trace(syscall_enter_probe, "sys_enter", tp_sys_enter);
-#else
-		ret = register_trace_syscall_enter(syscall_enter_probe);
-#endif
+		ret = register_sysenter();
 		if (ret) {
 			pr_err("can't create the sys_enter tracepoint\n");
 			goto err_sys_enter;
@@ -515,11 +529,7 @@ err_signal_deliver:
 err_sched_switch:
 	compat_unregister_trace(syscall_procexit_probe, "sched_process_exit", tp_sched_process_exit);
 err_sched_procexit:
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
-	compat_unregister_trace(syscall_enter_probe, "sys_enter", tp_sys_enter);
-#else
-	unregister_trace_syscall_enter(syscall_enter_probe);
-#endif
+	unregister_sysenter();
 err_sys_enter:
 	unregister_sysexit();
 err_sys_exit:
@@ -586,11 +596,7 @@ static int ppm_release(struct inode *inode, struct file *filp)
 			pr_info("no more consumers, stopping capture\n");
 
 			unregister_sysexit();
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
-			compat_unregister_trace(syscall_enter_probe, "sys_enter", tp_sys_enter);
-#else
-			unregister_trace_syscall_enter(syscall_enter_probe);
-#endif
+			unregister_sysenter();
 			compat_unregister_trace(syscall_procexit_probe, "sched_process_exit", tp_sched_process_exit);
 
 #ifdef CAPTURE_CONTEXT_SWITCHES
