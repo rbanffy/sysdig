@@ -265,6 +265,41 @@ static int register_signal_deliver(void)
 #endif
 }
 
+static int register_page_faults(void)
+{
+#ifdef CAPTURE_PAGE_FAULTS
+	int ret = 0;
+	ASSERT(g_tracepoint_registered);
+
+	if (!g_fault_tracepoint_registered) {
+		ret = compat_register_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
+		if (ret) {
+			pr_err("can't create the page_fault_user tracepoint\n");
+			return -EINVAL;
+		}
+
+		ret = compat_register_trace(page_fault_probe, "page_fault_kernel", tp_page_fault_kernel);
+		if (ret) {
+			pr_err("can't create the page_fault_kernel tracepoint\n");
+			goto err_page_fault_kernel;
+		}
+
+		g_fault_tracepoint_registered = true;
+	}
+
+cleanup:
+	return ret;
+
+err_page_fault_kernel:
+	unregister_page_fault_user();
+	return -EINVAL;
+
+#else
+	pr_err("kernel doesn't support page fault tracepoints\n");
+	return -EINVAL;
+#endif
+}
+
 static void compat_unregister_trace(void *func, const char *probename, struct tracepoint *tp)
 {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0))
@@ -303,6 +338,32 @@ static void unregister_signal_deliver(void)
 {
 #ifdef CAPTURE_SIGNAL_DELIVERIES
 	compat_unregister_trace(signal_deliver_probe, "signal_deliver", tp_signal_deliver);
+#endif
+}
+
+static void unregister_page_fault_user(void)
+{
+#ifdef CAPTURE_PAGE_FAULTS
+	compat_unregister_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
+#endif
+}
+
+static void unregister_page_fault_kernel(void)
+{
+#ifdef CAPTURE_PAGE_FAULTS
+	compat_unregister_trace(page_fault_probe, "page_fault_kernel", tp_page_fault_kernel);
+#endif
+}
+
+static void unregister_page_faults(void)
+{
+#ifdef CAPTURE_PAGE_FAULTS
+	if (g_fault_tracepoint_registered) {
+		unregister_page_fault_user();
+		unregister_page_fault_kernel();
+
+		g_fault_tracepoint_registered = false;
+	}
 #endif
 }
 
@@ -626,14 +687,8 @@ static int ppm_release(struct inode *inode, struct file *filp)
 			compat_unregister_trace(syscall_procexit_probe, "sched_process_exit", tp_sched_process_exit);
 			unregister_sched_switch();
 			unregister_signal_deliver();
-#ifdef CAPTURE_PAGE_FAULTS
-			if (g_fault_tracepoint_registered) {
-				compat_unregister_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
-				compat_unregister_trace(page_fault_probe, "page_fault_kernel", tp_page_fault_kernel);
+			unregister_page_faults();
 
-				g_fault_tracepoint_registered = false;
-			}
-#endif
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
 			tracepoint_synchronize_unregister();
 #endif
@@ -1053,44 +1108,18 @@ cleanup_ioctl_procinfo:
 	case PPM_IOCTL_ENABLE_PAGE_FAULTS:
 	{
 		vpr_info("PPM_IOCTL_ENABLE_PAGE_FAULTS\n");
-#ifdef CAPTURE_PAGE_FAULTS
-		ASSERT(g_tracepoint_registered);
-
-		if (!g_fault_tracepoint_registered) {
-			ret = compat_register_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
-			if (ret) {
-				pr_err("can't create the page_fault_user tracepoint\n");
-				ret = -EINVAL;
-				goto cleanup_ioctl;
-			}
-
-			ret = compat_register_trace(page_fault_probe, "page_fault_kernel", tp_page_fault_kernel);
-			if (ret) {
-				pr_err("can't create the page_fault_kernel tracepoint\n");
-				ret = -EINVAL;
-				goto err_page_fault_kernel;
-			}
-
-			g_fault_tracepoint_registered = true;
+		ret = register_page_faults();
+		if (ret) {
+			pr_err("can't create the page_fault_user tracepoint\n");
+			ret = -EINVAL;
 		}
-
-		ret = 0;
 		goto cleanup_ioctl;
-#else
-		pr_err("kernel doesn't support page fault tracepoints\n");
-		ret = -EINVAL;
-		goto cleanup_ioctl;
-#endif
 	}
 	default:
 		ret = -ENOTTY;
 		goto cleanup_ioctl;
 	}
 
-#ifdef CAPTURE_PAGE_FAULTS
-err_page_fault_kernel:
-	compat_unregister_trace(page_fault_probe, "page_fault_user", tp_page_fault_user);
-#endif
 cleanup_ioctl:
 	mutex_unlock(&g_consumer_mutex);
 cleanup_ioctl_nolock:
